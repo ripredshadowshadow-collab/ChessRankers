@@ -6,7 +6,9 @@ import { Chess, type Square } from "chess.js";
 const glyphs: Record<string, string> = { wK:"♔", wQ:"♕", wR:"♖", wB:"♗", wN:"♘", wP:"♙", bK:"♚", bQ:"♛", bR:"♜", bB:"♝", bN:"♞", bP:"♟" };
 const files = ["a","b","c","d","e","f","g","h"];
 
-export default function ChessBoard({ game, onMove, orientation = "white" }: { game: Chess; onMove?: (san: string) => void; orientation?: "white" | "black" }) {
+type Props = { game: Chess; onMove?: (san: string, nextGame: Chess) => void; orientation?: "white" | "black" };
+
+export default function ChessBoard({ game, onMove, orientation = "white" }: Props) {
   const [selected, setSelected] = useState<Square | null>(null);
   const legalTargets = useMemo(() => selected ? game.moves({ square: selected, verbose: true }).map(m => m.to) : [], [game, selected]);
   const ranks = orientation === "white" ? [8,7,6,5,4,3,2,1] : [1,2,3,4,5,6,7,8];
@@ -16,9 +18,10 @@ export default function ChessBoard({ game, onMove, orientation = "white" }: { ga
     const piece = game.get(square);
     if (selected && legalTargets.includes(square)) {
       try {
-        const move = game.move({ from: selected, to: square, promotion: "q" });
+        const nextGame = new Chess(game.fen());
+        const move = nextGame.move({ from: selected, to: square, promotion: "q" });
         setSelected(null);
-        onMove?.(move.san);
+        onMove?.(move.san, nextGame);
         return;
       } catch {}
     }
