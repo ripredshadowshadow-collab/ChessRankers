@@ -4,20 +4,110 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chess, type Move } from "chess.js";
 import ChessBoard from "@/components/chess-board";
 
-const FACTORS = ["Material","Checks","Captures","Threats","Piece activity","King safety","Position","Time to think","Challenge"];
-const values = { p:100, n:320, b:330, r:500, q:900, k:20000 } as const;
-function positionScore(game: Chess, side: "w" | "b") { let score=0; for(const row of game.board()) for(const piece of row) if(piece) score+=(piece.color===side?1:-1)*values[piece.type]; return score; }
-function chooseBotMove(position: Chess): Move | null { const moves=position.moves({verbose:true}) as Move[]; if(!moves.length)return null; const scored=moves.map(move=>{const test=new Chess(position.fen());const played=test.move(move);let score=positionScore(test,"b");if(played.captured)score+=values[played.captured]*0.8;if(test.isCheck())score+=55;if(test.isCheckmate())score+=100000;return{move,score};}).sort((a,b)=>b.score-a.score);const noise=Math.max(1,Math.floor(scored.length*0.28));return scored[Math.floor(Math.random()*Math.min(noise,scored.length))].move; }
-function initialFactors(){return Object.fromEntries(FACTORS.map(f=>[f,50]));}
+const PIECE_VALUE = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 } as const;
+const FACTORS = ["Material", "Checks", "Captures", "Threats", "Piece activity", "King safety", "Position", "Time to think", "Challenge"];
 
-export default function PlayPage(){
- const [game,setGame]=useState(()=>new Chess()); const [moves,setMoves]=useState<string[]>([]); const [botElo,setBotElo]=useState(1200); const [cycle,setCycle]=useState(10); const [playerClock,setPlayerClock]=useState(600); const [botClock,setBotClock]=useState(600); const [thinking,setThinking]=useState(false); const [status,setStatus]=useState("Your move"); const [factors,setFactors]=useState<Record<string,number>>(initialFactors); const [result,setResult]=useState<string|null>(null); const moveStarted=useRef(Date.now()); const lastTick=useRef(Date.now());
- const moveRows=useMemo(()=>{const rows:{n:number;white?:string;black?:string}[]=[];for(let i=0;i<moves.length;i+=2)rows.push({n:i/2+1,white:moves[i],black:moves[i+1]});return rows;},[moves]);
- const finish=useCallback((text:string)=>{setResult(text);setThinking(false);setStatus(text);},[]);
- useEffect(()=>{if(result)return;const timer=window.setInterval(()=>{const now=Date.now();const elapsed=(now-lastTick.current)/1000;lastTick.current=now;if(game.turn()==="w")setPlayerClock(v=>Math.max(0,v-elapsed));else if(thinking)setBotClock(v=>Math.max(0,v-elapsed));},250);return()=>window.clearInterval(timer);},[game,thinking,result]);
- const makeBotMove=useCallback((position:Chess)=>{if(position.isGameOver()){finish(position.isCheckmate()?"Checkmate — you win":"Game drawn");return;}setThinking(true);setStatus("Opponent thinking…");const delay=Math.min(1300,Math.max(320,1050-Math.round((botElo-1000)*0.12)));window.setTimeout(()=>{const next=new Chess(position.fen());const move=chooseBotMove(next);if(!move){finish("Game drawn");return;}next.move(move);const history=next.history();setGame(next);setMoves(history);setThinking(false);setStatus(next.isCheck()?"Your move — check":"Your move");moveStarted.current=Date.now();lastTick.current=Date.now();if(history.length%10===0){const score=positionScore(next,"w");setBotElo(v=>Math.max(0,Math.min(3000,v+(score>0?60:score<-200?-45:15))));setCycle(history.length+10);}if(next.isGameOver())finish(next.isCheckmate()?"Checkmate — opponent wins":"Game drawn");},delay);},[botElo,finish]);
- function handleMove(_san:string,nextGame:Chess){if(thinking||result||game.turn()!=="w")return;const history=nextGame.history({verbose:true}) as Move[];const last=history.at(-1);if(!last||last.color!=="w")return;const elapsed=(Date.now()-moveStarted.current)/1000;setGame(nextGame);setMoves(nextGame.history());setFactors(prev=>({...prev,"Time to think":Math.max(10,Math.min(95,82-elapsed*2)),"Captures":Math.min(99,prev.Captures+(last.captured?4:0)),"Checks":Math.min(99,prev.Checks+(last.san.includes("+")?4:0)),"Position":Math.max(10,Math.min(95,prev.Position+(last.san.length<5?1:-1)),"Threats":Math.max(10,Math.min(95,prev.Threats+(last.san.includes("Q")?2:0)))}));if(nextGame.isGameOver()){finish(nextGame.isCheckmate()?"Checkmate — you win":"Game drawn");return;}moveStarted.current=Date.now();lastTick.current=Date.now();makeBotMove(nextGame);}
- function reset(){setGame(new Chess());setMoves([]);setBotElo(1200);setCycle(10);setPlayerClock(600);setBotClock(600);setThinking(false);setStatus("Your move");setResult(null);setFactors(initialFactors());moveStarted.current=Date.now();lastTick.current=Date.now();}
- const fmt=(s:number)=>`${Math.floor(s/60).toString().padStart(2,"0")}:${Math.floor(s%60).toString().padStart(2,"0")}`; const total=Math.max(1,Object.values(factors).reduce((a,b)=>a+b,0));
- return <div className="cr-shell"><nav className="cr-nav"><a href="/" className="cr-brand"><span className="cr-mark">♞</span><span>ChessRankers</span></a><div className="cr-links"><a className="active" href="/play">Play AI</a><a href="/solo">Solo Chess</a><a href="/pvp">Play a Friend</a><a href="/tester">Move Tester</a><a href="/leaderboard">Leaderboard</a><a href="/profile">Profile</a></div></nav><main className="chess-page"><div className="match-top"><div><h1>Rated AI</h1><p>Competitive match · adaptive opponent · evaluation every 10 moves</p></div><span className="mode-pill">RATED</span></div><section className="match-layout"><div className="board-wrap"><div className="player-card" style={{marginBottom:10}}><div className="player-line"><span className="player-name">Adaptive Opponent</span><span className="player-rating">{botElo} Elo</span></div><div className={`clock ${thinking?"active":""}`}>{fmt(botClock)}</div></div><ChessBoard game={game} onMove={handleMove}/><div className="board-meta"><span>{status}</span><strong>Next evaluation: move {cycle}</strong></div></div><aside className="side-stack"><div className="player-card"><div className="player-line"><span className="player-name">You</span><span className="player-rating">Your current rating is stored server-side</span></div><div className={`clock ${!thinking?"active":""}`}>{fmt(playerClock)}</div></div><div className="info-card"><h3>Adaptive opponent</h3><div className="ai-strength"><strong>{botElo}</strong><span className="player-rating">effective Elo</span></div><p style={{color:"var(--muted)",fontSize:12,lineHeight:1.5}}>Strength adjusts from demonstrated play. You never select the bot rating.</p></div><div className="info-card"><h3>Elo performance breakdown</h3><div className="factor-list">{Object.entries(factors).map(([name,value])=>{const pct=Math.max(1,Math.round(value/total*100));return <div className="factor-row" key={name}><span>{name}</span><b>{pct}%</b><div className="progress"><i style={{width:`${pct}%`}}/></div></div>})}</div><p className="cr-note">These live indicators are a preview. Final Elo contributions are calculated from validated game data.</p></div><div className="info-card"><h3>Moves</h3><div className="move-list">{moveRows.length?moveRows.map(r=><div className="move-row" key={r.n}><span>{r.n}.</span><span>{r.white}</span><span>{r.black??""}</span></div>):<span style={{color:"var(--muted)",fontSize:12}}>Make your first move.</span>}</div></div>{result&&<div className="info-card"><h3>Game result</h3><strong>{result}</strong><p className="cr-note">Only server-validated completed rated games change competitive Elo.</p></div>}<div className="controls"><button className="control" onClick={reset}>New game</button><button className="control" onClick={reset}>Reset position</button><button className="control" onClick={()=>finish("You resigned")}>Resign</button><button className="control" onClick={()=>finish("Draw agreed")}>Draw</button></div></aside></section></main></div>;
+function material(game: Chess, side: "w" | "b") {
+  let score = 0;
+  for (const row of game.board()) for (const piece of row) if (piece) score += (piece.color === side ? 1 : -1) * PIECE_VALUE[piece.type];
+  return score;
+}
+
+function chooseBotMove(position: Chess): Move | null {
+  const moves = position.moves({ verbose: true }) as Move[];
+  if (!moves.length) return null;
+  const ranked = moves.map((move) => {
+    const test = new Chess(position.fen());
+    const played = test.move(move);
+    let score = material(test, "b");
+    if (played.captured) score += PIECE_VALUE[played.captured] * 0.8;
+    if (test.isCheck()) score += 55;
+    if (test.isCheckmate()) score += 100000;
+    return { move, score };
+  }).sort((a, b) => b.score - a.score);
+  const pool = Math.max(1, Math.ceil(ranked.length * 0.28));
+  return ranked[Math.floor(Math.random() * pool)].move;
+}
+
+function initialFactors() { return Object.fromEntries(FACTORS.map((name) => [name, 50])); }
+const formatClock = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${Math.floor(seconds % 60).toString().padStart(2, "0")}`;
+
+export default function PlayPage() {
+  const [game, setGame] = useState(() => new Chess());
+  const [moves, setMoves] = useState<string[]>([]);
+  const [botElo, setBotElo] = useState(1200);
+  const [nextEvaluation, setNextEvaluation] = useState(10);
+  const [playerClock, setPlayerClock] = useState(600);
+  const [botClock, setBotClock] = useState(600);
+  const [thinking, setThinking] = useState(false);
+  const [status, setStatus] = useState("Your move");
+  const [result, setResult] = useState<string | null>(null);
+  const [factors, setFactors] = useState<Record<string, number>>(initialFactors);
+  const moveStarted = useRef(Date.now());
+  const lastTick = useRef(Date.now());
+
+  const finish = useCallback((message: string) => { setResult(message); setThinking(false); setStatus(message); }, []);
+
+  useEffect(() => {
+    if (result) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      const elapsed = (now - lastTick.current) / 1000;
+      lastTick.current = now;
+      if (game.turn() === "w") setPlayerClock((v) => Math.max(0, v - elapsed));
+      else if (thinking) setBotClock((v) => Math.max(0, v - elapsed));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [game, thinking, result]);
+
+  const makeBotMove = useCallback((position: Chess) => {
+    setThinking(true); setStatus("Opponent thinking…");
+    const delay = Math.min(1300, Math.max(320, 1050 - Math.round((botElo - 1000) * 0.12)));
+    window.setTimeout(() => {
+      const next = new Chess(position.fen());
+      const move = chooseBotMove(next);
+      if (!move) { finish("Game drawn"); return; }
+      next.move(move);
+      const history = next.history();
+      setGame(next); setMoves(history); setThinking(false);
+      setStatus(next.isCheck() ? "Your move — check" : "Your move");
+      moveStarted.current = Date.now(); lastTick.current = Date.now();
+      if (history.length % 10 === 0) {
+        const score = material(next, "w");
+        setBotElo((v) => Math.max(0, Math.min(3000, v + (score > 0 ? 60 : score < -200 ? -45 : 15))));
+        setNextEvaluation(history.length + 10);
+      }
+      if (next.isGameOver()) finish(next.isCheckmate() ? "Checkmate — opponent wins" : "Game drawn");
+    }, delay);
+  }, [botElo, finish]);
+
+  function handleMove(_san: string, nextGame: Chess) {
+    if (thinking || result || game.turn() !== "w") return;
+    const history = nextGame.history({ verbose: true }) as Move[];
+    const last = history.at(-1);
+    if (!last || last.color !== "w") return;
+    const elapsed = (Date.now() - moveStarted.current) / 1000;
+    setGame(nextGame); setMoves(nextGame.history());
+    setFactors((prev) => ({
+      ...prev,
+      "Time to think": Math.max(10, Math.min(95, 82 - elapsed * 2)),
+      Captures: Math.min(99, prev.Captures + (last.captured ? 4 : 0)),
+      Checks: Math.min(99, prev.Checks + (last.san.includes("+") ? 4 : 0)),
+      Position: Math.max(10, Math.min(95, prev.Position + (last.san.length < 5 ? 1 : -1))),
+      Threats: Math.max(10, Math.min(95, prev.Threats + (last.san.includes("Q") ? 2 : 0))),
+    }));
+    if (nextGame.isGameOver()) { finish(nextGame.isCheckmate() ? "Checkmate — you win" : "Game drawn"); return; }
+    moveStarted.current = Date.now(); lastTick.current = Date.now(); makeBotMove(nextGame);
+  }
+
+  function reset() {
+    setGame(new Chess()); setMoves([]); setBotElo(1200); setNextEvaluation(10); setPlayerClock(600); setBotClock(600);
+    setThinking(false); setStatus("Your move"); setResult(null); setFactors(initialFactors());
+    moveStarted.current = Date.now(); lastTick.current = Date.now();
+  }
+
+  const moveRows = useMemo(() => { const rows: { n: number; white?: string; black?: string }[] = []; for (let i = 0; i < moves.length; i += 2) rows.push({ n: i / 2 + 1, white: moves[i], black: moves[i + 1] }); return rows; }, [moves]);
+  const total = Math.max(1, Object.values(factors).reduce((a, b) => a + b, 0));
+
+  return <div className="cr-shell"><nav className="cr-nav"><a href="/" className="cr-brand"><span className="cr-mark">♞</span><span>ChessRankers</span></a><div className="cr-links"><a className="active" href="/play">Play AI</a><a href="/solo">Solo Chess</a><a href="/pvp">Play a Friend</a><a href="/tester">Move Tester</a><a href="/leaderboard">Leaderboard</a><a href="/profile">Profile</a></div></nav><main className="chess-page"><div className="match-top"><div><h1>Rated AI</h1><p>Competitive match · adaptive opponent · evaluation every 10 moves</p></div><span className="mode-pill">RATED</span></div><section className="match-layout"><div className="board-wrap"><div className="player-card" style={{marginBottom:10}}><div className="player-line"><span className="player-name">Adaptive Opponent</span><span className="player-rating">{botElo} Elo</span></div><div className={`clock ${thinking ? "active" : ""}`}>{formatClock(botClock)}</div></div><ChessBoard game={game} onMove={handleMove}/><div className="board-meta"><span>{status}</span><strong>Next evaluation: move {nextEvaluation}</strong></div></div><aside className="side-stack"><div className="player-card"><div className="player-line"><span className="player-name">You</span><span className="player-rating">Server-rated account</span></div><div className={`clock ${!thinking ? "active" : ""}`}>{formatClock(playerClock)}</div></div><div className="info-card"><h3>Adaptive opponent</h3><div className="ai-strength"><strong>{botElo}</strong><span className="player-rating">effective Elo</span></div><p style={{color:"var(--muted)",fontSize:12,lineHeight:1.5}}>Strength adjusts from demonstrated play. You never select the bot rating.</p></div><div className="info-card"><h3>Elo performance breakdown</h3><div className="factor-list">{Object.entries(factors).map(([name,value]) => { const pct=Math.max(1,Math.round(value/total*100)); return <div className="factor-row" key={name}><span>{name}</span><b>{pct}%</b><div className="progress"><i style={{width:`${pct}%`}}/></div></div>; })}</div><p className="cr-note">Live indicators are a preview. Final Elo contributions come from validated game data.</p></div><div className="info-card"><h3>Moves</h3><div className="move-list">{moveRows.length ? moveRows.map((r) => <div className="move-row" key={r.n}><span>{r.n}.</span><span>{r.white}</span><span>{r.black ?? ""}</span></div>) : <span style={{color:"var(--muted)",fontSize:12}}>Make your first move.</span>}</div></div>{result && <div className="info-card"><h3>Game result</h3><strong>{result}</strong><p className="cr-note">Only server-validated completed rated games change competitive Elo.</p></div>}<div className="controls"><button className="control" onClick={reset}>New game</button><button className="control" onClick={reset}>Reset position</button><button className="control" onClick={() => finish("You resigned")}>Resign</button><button className="control" onClick={() => finish("Draw agreed")}>Draw</button></div></aside></section></main></div>;
 }
