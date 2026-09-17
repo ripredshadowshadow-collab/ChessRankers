@@ -1,0 +1,1 @@
+Server-only endpoint for recording a validated rated AI game. The client must send a Supabase access token and a completed PGN. This function is intentionally separate from PvP and unrated modes.
