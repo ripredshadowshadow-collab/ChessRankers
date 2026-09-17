@@ -7,6 +7,7 @@ export async function GET(request: NextRequest) {
   const tokenHash = url.searchParams.get("token_hash");
   const type = url.searchParams.get("type") as EmailOtpType | null;
   const next = url.searchParams.get("next") || "/play";
+  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/play";
   url.searchParams.delete("token_hash");
   url.searchParams.delete("type");
   url.searchParams.delete("next");
@@ -25,6 +26,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  url.pathname = next.startsWith("/") ? next : "/play";
+  url.pathname = safeNext;
   return NextResponse.redirect(url);
 }
